@@ -1,3 +1,5 @@
+package com.example;
+
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -21,6 +23,12 @@ public class Producer100 {
             // Отправка сообщения
             ProducerRecord<String, String> record = new ProducerRecord<>("my_topic", "key-" + i, "message" + i);
             producer.send(record);
+            try {
+                // Задержка на 100 миллисекунд
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         }
 
         // Закрытие продюсера

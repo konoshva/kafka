@@ -1,3 +1,5 @@
+package com.example;
+
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -19,8 +21,8 @@ public class BatchMessageConsumer {
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");        // Начало чтения с самого начала
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");           // Автоматический коммит смещений
         props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "6000");           // Время ожидания активности от консьюмера
-        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 50);                   // Минимальное количество байт в пакете
-        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 200);                // Минимальное количество байт в пакете
+        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1000);                   // Минимальное количество байт в пакете
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 1000);                // Максимальное время сборки данных продьюсером
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 
@@ -30,10 +32,14 @@ public class BatchMessageConsumer {
         // Чтение сообщений в бесконечном цикле
         try {
             while (true) {
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));  // Получение сообщений
-                for (ConsumerRecord<String, String> record : records) {
-                    System.out.printf("Получено сообщение: key = %s, value = %s, partition = %d, offset = %d%n",
-                            record.key(), record.value(), record.partition(), record.offset());
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));  // Получение сообщений
+                if (!records.isEmpty()) {
+                    for (ConsumerRecord<String, String> record : records) {
+                        System.out.printf("Получено сообщение: key = %s, value = %s, partition = %d, offset = %d%n",
+                                record.key(), record.value(), record.partition(), record.offset());
+                    }
+                    consumer.commitSync();
+                    System.out.println("Фикcация");
                 }
             }
         } finally {
