@@ -1,5 +1,3 @@
-package com.example;
-
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -10,12 +8,12 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
 
-public class ConsumerExample {
+public class SingleMessageConsumer {
     public static void main(String[] args) {
         // Настройка консьюмера
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");  // Адрес брокера Kafka
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "consumer-group");        // Уникальный идентификатор группы
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");  // Адрес брокера Kafka
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "consumer-group1");        // Уникальный идентификатор группы
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");        // Начало чтения с самого начала
@@ -25,7 +23,7 @@ public class ConsumerExample {
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 
         // Подписка на топик
-        consumer.subscribe(Collections.singletonList("some-topic"));
+        consumer.subscribe(Collections.singletonList("my_topic"));
 
         // Чтение сообщений в бесконечном цикле
         try {

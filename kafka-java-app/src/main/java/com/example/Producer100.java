@@ -1,13 +1,11 @@
-package com.example;
-
 import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
 
 import java.util.Properties;
 
-public class Producer {
+public class Producer100 {
     public static void main(String[] args) {
         // Конфигурация продюсера – адрес сервера, сериализаторы для ключа и значения.
         Properties properties = new Properties();
@@ -18,10 +16,12 @@ public class Producer {
         // Создание продюсера
         KafkaProducer<String, String> producer = new KafkaProducer<>(properties);
 
-        // Отправка сообщения
-        ProducerRecord<String, String> record = new ProducerRecord<>("my_topic", "key-1", "message-1");
-        producer.send(record);
-
+        int i;
+        for (i = 0; i < 100; i++) {
+            // Отправка сообщения
+            ProducerRecord<String, String> record = new ProducerRecord<>("my_topic", "key-" + i, "message" + i);
+            producer.send(record);
+        }
 
         // Закрытие продюсера
         producer.close();
