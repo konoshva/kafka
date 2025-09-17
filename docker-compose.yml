@@ -85,6 +85,8 @@ services:
     command: "java -cp kafka-java-app-1.0.jar com.example.SingleMessageConsumer"
     volumes:
       - .//kafka-java-app//target:/app
+    deploy:
+      replicas: 2
   batch_consumer:
     image: bitnami/java:latest
     depends_on:
@@ -93,3 +95,5 @@ services:
     command: "java -cp kafka-java-app-1.0.jar com.example.BatchMessageConsumer"
     volumes:
       - .//kafka-java-app//target:/app  
+    deploy:
+      replicas: 2
