@@ -11,7 +11,8 @@ public class Producer100 {
     public static void main(String[] args) {
         // Конфигурация продюсера – адрес сервера, сериализаторы для ключа и значения.
         Properties properties = new Properties();
-        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");
+        //properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");
+        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka1:9092");
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
 
@@ -21,7 +22,7 @@ public class Producer100 {
         int i;
         for (i = 0; i < 100; i++) {
             // Отправка сообщения
-            ProducerRecord<String, String> record = new ProducerRecord<>("my_topic", "key-" + i, "message" + i);
+            ProducerRecord<String, String> record = new ProducerRecord<>("my_topic", "key-" + i, "message-" + i);
             producer.send(record);
             try {
                 // Задержка на 100 миллисекунд

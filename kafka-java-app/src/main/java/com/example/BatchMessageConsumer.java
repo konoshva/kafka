@@ -14,7 +14,8 @@ public class BatchMessageConsumer {
     public static void main(String[] args) {
         // Настройка консьюмера
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");  // Адрес брокера Kafka
+        //props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");  // Адрес брокера Kafka
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka1:9092");  // Адрес брокера Kafka
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "consumer-group2");        // Уникальный идентификатор группы
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
@@ -22,7 +23,7 @@ public class BatchMessageConsumer {
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");           // Автоматический коммит смещений
         props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "6000");           // Время ожидания активности от консьюмера
         props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1000);                   // Минимальное количество байт в пакете
-        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 1000);                // Максимальное время сборки данных продьюсером
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 400);                // Максимальное время сборки данных продьюсером
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 
@@ -32,11 +33,16 @@ public class BatchMessageConsumer {
         // Чтение сообщений в бесконечном цикле
         try {
             while (true) {
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));  // Получение сообщений
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));  // Получение сообщений
                 if (!records.isEmpty()) {
                     for (ConsumerRecord<String, String> record : records) {
-                        System.out.printf("Получено сообщение: key = %s, value = %s, partition = %d, offset = %d%n",
-                                record.key(), record.value(), record.partition(), record.offset());
+                        try {
+                            System.out.printf("Получено сообщение: key = %s, value = %s, partition = %d, offset = %d%n",
+                                    record.key(), record.value(), record.partition(), record.offset());
+                            //long inducted_error = (long) 1 / (record.offset() % (long) 20); //Для тестирования ошибок
+                        } catch (Exception e) {
+                            System.out.println("An exception occurred: " + e.getMessage());
+                        }
                     }
                     consumer.commitSync();
                     System.out.println("Фикcация");

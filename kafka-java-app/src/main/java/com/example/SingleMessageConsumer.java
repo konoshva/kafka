@@ -14,7 +14,8 @@ public class SingleMessageConsumer {
     public static void main(String[] args) {
         // Настройка консьюмера
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");  // Адрес брокера Kafka
+//        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");  // Адрес брокера Kafka
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka1:9092");  // Адрес брокера Kafka
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "consumer-group1");        // Уникальный идентификатор группы
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
@@ -32,8 +33,13 @@ public class SingleMessageConsumer {
             while (true) {
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));  // Получение сообщений
                 for (ConsumerRecord<String, String> record : records) {
-                    System.out.printf("Получено сообщение: key = %s, value = %s, partition = %d, offset = %d%n",
-                            record.key(), record.value(), record.partition(), record.offset());
+                    try {
+                        System.out.printf("Обрабатываю сообщение: key = %s, value = %s, partition = %d, offset = %d%n",
+                                record.key(), record.value(), record.partition(), record.offset());
+                        //long inducted_error = (long) 1 / (record.offset() % (long) 20); //Для тестирования ошибок
+                    } catch (Exception e) {
+                        System.out.println("An exception occurred: " + e.getMessage());
+                    }
                 }
             }
         } finally {
