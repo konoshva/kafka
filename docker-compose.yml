@@ -7,6 +7,8 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+      
+      
   kafka1:
     image: confluentinc/cp-kafka:7.0.1
     container_name: kafka1-1
@@ -22,6 +24,8 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
       - "9094:9094"
+      
+      
   kafka2:
     image: confluentinc/cp-kafka:7.0.1
     container_name: kafka2-1
@@ -37,6 +41,8 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
       - "9095:9095"
+      
+      
   kafka3:
     image: confluentinc/cp-kafka:7.0.1
     container_name: kafka3-1
@@ -52,14 +58,31 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
       - "9096:9096"
+      
+      
+  schema-registry:
+    image: confluentinc/cp-schema-registry:latest
+    depends_on:
+      - kafka1
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka1:9092
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      
+      
   ui:
     image: provectuslabs/kafka-ui:v0.7.0
     container_name: ui-1
     ports:
       - "8080:8080"
     environment:
-      - KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS=kafka1:9092,kafka2:9092,kafka3:9092
-      - KAFKA_CLUSTERS_0_NAME=main
+      KAFKA_CLUSTERS_0_NAME: main
+      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: kafka1:9092,kafka2:9092,kafka3:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      
+      
   topic_checker:
     image: bitnami/java:latest
     depends_on:
@@ -67,6 +90,8 @@ services:
     command: "java -cp kafka-java-app-1.0.jar com.example.TopicChecker"
     volumes:
       - .//kafka-java-app//target:/app
+      
+      
   producer:
     image: bitnami/java:latest
     depends_on:
@@ -77,6 +102,8 @@ services:
     command: "java -cp kafka-java-app-1.0.jar com.example.Producer100"
     volumes:
       - .//kafka-java-app//target:/app
+      
+      
   sm_consumer:
     image: bitnami/java:latest
     depends_on:
@@ -87,6 +114,8 @@ services:
       - .//kafka-java-app//target:/app
     deploy:
       replicas: 2
+      
+      
   batch_consumer:
     image: bitnami/java:latest
     depends_on:
