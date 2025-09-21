@@ -9,7 +9,7 @@ import java.util.Set;
 public class TopicChecker {
     public static void main(String[] args) {
         Properties props = new Properties();
-        props.put("bootstrap.servers", "kafka1:9092");  // Адрес брокера Kafka
+        props.put("bootstrap.servers", "kafka1:9092,kafka2:9092,kafka3:9092");  // Адреса брокеров Kafka
         // Создание AdminClient
         try (AdminClient adminClient = AdminClient.create(props)) {
             String topicToCheck = "my_topic";

@@ -38,26 +38,25 @@ public class SingleMessageConsumerJson {
         // Настройка консьюмера
         Properties props = new Properties();
 /*
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:19092,localhost:29092,localhost:39092");  // Адрес брокера Kafka
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:19092,localhost:29092,localhost:39092");
         props.put(KafkaJsonSchemaDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, "http://localhost:8081");
 */
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka1:9092,kafka2:9092,kafka3:9092");  // Адрес брокера Kafka
-        props.put(KafkaJsonSchemaDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, "http://schema-registry:8081");
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka1:9092,kafka2:9092,kafka3:9092"); //адреса брокеров Kafka, к которым будет подключаться консьюмер
+        props.put(KafkaJsonSchemaDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, "http://schema-registry:8081"); //URL Schema Registry, который используется для хранения схемы JSON
 
-
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "consumer-group1");        // Уникальный идентификатор группы
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaJsonSchemaDeserializer.class.getName());
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "consumer-group1"); // Уникальный идентификатор группы
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName()); //Задает строковый сериализатор для ключей
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaJsonSchemaDeserializer.class.getName()); //Задает JSON сериализатор с использованием Schema Registry для значений
         props.put(KafkaJsonSchemaDeserializerConfig.JSON_VALUE_TYPE,
-                "com.example.SingleMessageConsumerJson$Product");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");        // Начало чтения с самого начала
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");           // Автоматический коммит смещений
-        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "6000");           // Время ожидания активности от консьюмера
+                "com.example.SingleMessageConsumerJson$Product"); //Говорит десериализатору в объект какого типа преобразовать полученный JSON
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"); //Если нет сохранённого смещения для группы, то начинать чтение с самого старого доступного сообщения
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true"); //Автоматический коммит смещений
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "6000"); //Срок пассивности консьюмера, по истечению которого он считается "мертвым" и Kafka начинает ребалансировку
 
-        try (KafkaConsumer<String, Product> consumer = new KafkaConsumer<>(props)) {
+        try (KafkaConsumer<String, Product> consumer = new KafkaConsumer<>(props)) { //В случае ошибки ресурс consumer автоматически освобождается
             consumer.subscribe(Collections.singletonList("my_topic"));
             while (true) {
-                ConsumerRecords<String, Product> records = consumer.poll(Duration.ofMillis(100));  // Получение сообщений
+                ConsumerRecords<String, Product> records = consumer.poll(Duration.ofMillis(100));  //Получение сообщений
                 for (ConsumerRecord<String, Product> record : records) {
                     Product product = record.value();
                     try {
