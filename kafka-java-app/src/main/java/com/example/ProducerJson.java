@@ -37,13 +37,18 @@ public class ProducerJson {
     public static void main(String[] args) {
         // Настройки для подключения к Kafka и Schema Registry
         Properties props = new Properties();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094");
-        props.put(KafkaJsonSchemaSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG,
-                "http://localhost:8081");
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-                StringSerializer.class.getName());
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-                KafkaJsonSchemaSerializer.class.getName());
+/*
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:19092,localhost:29092,localhost:39092");
+        props.put(KafkaJsonSchemaSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, "http://localhost:8081");
+*/
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka1:9092,kafka2:9092,kafka3:9092");
+        props.put(KafkaJsonSchemaSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, "http://schema-registry:8081");
+
+
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaJsonSchemaSerializer.class.getName());
+        props.put("acks", "all");
+        props.put("retries", 3);
         try (Producer<String, Product> producer = new KafkaProducer<>(props)) {
             Random random = new Random();
             int i;
@@ -62,6 +67,7 @@ public class ProducerJson {
             }
         } catch (Exception e) {
             System.out.println("An exception occurred: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }

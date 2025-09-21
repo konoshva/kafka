@@ -17,13 +17,13 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:9092,OUTSIDE://localhost:9094
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:9092,OUTSIDE://localhost:19092
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:19092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
-      - "9094:9094"
+      - "19092:19092"
       
       
   kafka2:
@@ -34,13 +34,13 @@ services:
     environment:
       KAFKA_BROKER_ID: 2
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:9092,OUTSIDE://localhost:9095
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:9095
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:9092,OUTSIDE://localhost:29092
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
-      - "9095:9095"
+      - "29092:29092"
       
       
   kafka3:
@@ -51,23 +51,23 @@ services:
     environment:
       KAFKA_BROKER_ID: 3
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:9092,OUTSIDE://localhost:9096
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:9096
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:9092,OUTSIDE://localhost:39092
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:39092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
-      - "9096:9096"
+      - "39092:39092"
       
       
   schema-registry:
-    image: confluentinc/cp-schema-registry:latest
+    image: confluentinc/cp-schema-registry:7.0.1
     depends_on:
       - kafka1
     ports:
       - "8081:8081"
     environment:
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka1:9092
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka1:9092,kafka2:9092,kafka3:9092
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
       
@@ -99,7 +99,7 @@ services:
         condition: service_completed_successfully
       batch_consumer:
         condition: service_started
-    command: "java -cp kafka-java-app-1.0.jar com.example.Producer100"
+    command: "java -cp kafka-java-app-1.0.jar com.example.ProducerJson"
     volumes:
       - .//kafka-java-app//target:/app
       
@@ -109,7 +109,7 @@ services:
     depends_on:
       topic_checker:
         condition: service_completed_successfully
-    command: "java -cp kafka-java-app-1.0.jar com.example.SingleMessageConsumer"
+    command: "java -cp kafka-java-app-1.0.jar com.example.SingleMessageConsumerJson"
     volumes:
       - .//kafka-java-app//target:/app
     deploy:
@@ -121,7 +121,7 @@ services:
     depends_on:
       topic_checker:
         condition: service_completed_successfully
-    command: "java -cp kafka-java-app-1.0.jar com.example.BatchMessageConsumer"
+    command: "java -cp kafka-java-app-1.0.jar com.example.BatchMessageConsumerJson"
     volumes:
       - .//kafka-java-app//target:/app  
     deploy:
