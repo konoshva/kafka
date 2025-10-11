@@ -53,6 +53,12 @@
             <artifactId>kafka-json-schema-serializer</artifactId>
             <version>7.9.0</version>
         </dependency>
+        <!-- Kafka Streams -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-streams</artifactId>
+            <version>3.7.0</version> <!-- Убедитесь, что версия соответствует вашей Kafka -->
+        </dependency>
     </dependencies>
     <build>
         <plugins>

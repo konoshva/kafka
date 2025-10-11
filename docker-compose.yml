@@ -1,128 +1,45 @@
+version: "3.9"
+
 services:
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.0.1
-    container_name: zookeeper-1
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
+    image: bitnami/zookeeper:3.8
     ports:
       - "2181:2181"
-      
-      
-  kafka1:
-    image: confluentinc/cp-kafka:7.0.1
-    container_name: kafka1-1
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    volumes:
+      - zookeeper_data:/bitnami/zookeeper
+
+  kafka-0:
+    image: bitnami/kafka:3.7.0
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_LISTENERS=EXTERNAL://:9092,PLAINTEXT://:9094
+      - KAFKA_CFG_ADVERTISED_LISTENERS=EXTERNAL://127.0.0.1:9092,PLAINTEXT://:9094
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
+      - KAFKA_CFG_MIN_IN_SYNC_REPLICAS=1
+      - KAFKA_BROKER_ID=0
+    volumes:
+      - kafka_0_data:/bitnami/kafka
     depends_on:
       - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:9092,OUTSIDE://localhost:19092
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:19092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    ports:
-      - "19092:19092"
-      
-      
-  kafka2:
-    image: confluentinc/cp-kafka:7.0.1
-    container_name: kafka2-1
-    depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:9092,OUTSIDE://localhost:29092
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    ports:
-      - "29092:29092"
-      
-      
-  kafka3:
-    image: confluentinc/cp-kafka:7.0.1
-    container_name: kafka3-1
-    depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 3
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:9092,OUTSIDE://localhost:39092
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:39092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    ports:
-      - "39092:39092"
-      
-      
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.0.1
-    depends_on:
-      - kafka1
-    ports:
-      - "8081:8081"
-    environment:
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka1:9092,kafka2:9092,kafka3:9092
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-      
-      
+
   ui:
     image: provectuslabs/kafka-ui:v0.7.0
-    container_name: ui-1
+    depends_on:
+      - kafka-0
+      - zookeeper
     ports:
       - "8080:8080"
     environment:
-      KAFKA_CLUSTERS_0_NAME: main
-      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: kafka1:9092,kafka2:9092,kafka3:9092
+      KAFKA_CLUSTERS_0_NAME: local-kafka
+      KAFKA_CLUSTERS_0_BOOTSTRAP_SERVERS: kafka-0:9094
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
-      
-      
-  topic_checker:
-    image: bitnami/java:latest
-    depends_on:
-      - kafka1
-    command: "java -cp kafka-java-app-1.0.jar com.example.TopicChecker"
-    volumes:
-      - .//kafka-java-app//target:/app
-      
-      
-  producer:
-    image: bitnami/java:latest
-    depends_on:
-      topic_checker:
-        condition: service_completed_successfully
-      batch_consumer:
-        condition: service_started
-    command: "java -cp kafka-java-app-1.0.jar com.example.ProducerJson"
-    volumes:
-      - .//kafka-java-app//target:/app
-      
-      
-  sm_consumer:
-    image: bitnami/java:latest
-    depends_on:
-      topic_checker:
-        condition: service_completed_successfully
-    command: "java -cp kafka-java-app-1.0.jar com.example.SingleMessageConsumerJson"
-    volumes:
-      - .//kafka-java-app//target:/app
-    deploy:
-      replicas: 2
-      
-      
-  batch_consumer:
-    image: bitnami/java:latest
-    depends_on:
-      topic_checker:
-        condition: service_completed_successfully
-    command: "java -cp kafka-java-app-1.0.jar com.example.BatchMessageConsumerJson"
-    volumes:
-      - .//kafka-java-app//target:/app  
-    deploy:
-      replicas: 2
+
+volumes:
+  zookeeper_data:
+  kafka_0_data:
