@@ -1,2 +1,4 @@
 
 /kafka-java-app/target/classes/com/example/*.class
+/kafka-java-app/src/main/java/com/examples/
+/kafka-java-app/target/classes/*
