@@ -21,9 +21,9 @@ import java.util.regex.Pattern;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.Objects;
-
-
-
+import java.util.stream.Collectors;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class MessageNetwork {
     private static final String BOOTSTRAP_SERVERS = "localhost:9092";
@@ -33,7 +33,8 @@ public class MessageNetwork {
     private static final String FILTERED_MESSAGES_TOPIC = "filtered_messages";
     private static final String BLOCKED_USERS_STORE = "blocked-users-store";
 
-    private static final Pattern PATTERN = Pattern.compile("\\W+", Pattern.UNICODE_CHARACTER_CLASS);
+    private static final Pattern PATTERN = Pattern.compile("(?<=\\P{L})(?=\\p{L})|(?<=\\p{L})(?=\\P{L})",
+            Pattern.UNICODE_CHARACTER_CLASS);
 
     private static String applicationId = "message-network";
 
@@ -44,29 +45,22 @@ public class MessageNetwork {
         try {
             createTopics();
 
-            KafkaStreams streams = buildStreamsApplication();
-            final CountDownLatch latch = new CountDownLatch(1);
+            KafkaStreams blockedUsersStreams = buildStreamsAppForBlockedUsers();
+            blockedUsersStreams.cleanUp();
+            blockedUsersStreams.start();
+            System.out.println("Приложение для обработки BlockedUsers запущено");
+            waitUntilKafkaStreamsIsRunning(blockedUsersStreams);
+            System.out.println("Загрузка тестовых данных для BlockedUsers...");
+            loadBlockedUsersTestData();
+            System.out.println("Ожидание готовности " + BLOCKED_USERS_STORE);
+            waitForStateStoreToBeReady(blockedUsersStreams);
+            queryStateStore(blockedUsersStreams);
 
-            // Обработка завершения работы
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                System.out.println("Завершение работы приложения...");
-                streams.close();
-                latch.countDown();
-            }));
-
-            // Очищаем локальные state store перед запуском (для тестирования)
-            streams.cleanUp();
-
+            KafkaStreams streams = buildStreamsApplication(blockedUsersStreams);
             streams.start();
             System.out.println("Приложение " + applicationId + " запущено");
-
-            // Ждем, пока приложение полностью запустится
-            waitUntilKafkaStreamsIsRunning(streams);
+            System.out.println("Загрузка тестовых данных...");
             loadTestData();
-
-            // Демонстрация запросов к state store
-            TimeUnit.SECONDS.sleep(15); // Даем время на обработку сообщений
-            queryStateStore(streams);
 
         } catch (Throwable e) {
             System.err.println("Ошибка при запуске приложения: " + e.getMessage());
@@ -75,59 +69,82 @@ public class MessageNetwork {
         }
     }
 
-    private static KafkaStreams buildStreamsApplication() {
+    private static KafkaStreams buildStreamsAppForBlockedUsers() {
         // Настройка Kafka Streams
+        Properties props = new Properties();
+        props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId + "_bu");
+        props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
+        props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+
+        StreamsBuilder builder = new StreamsBuilder();
+        builder.table(BLOCKED_USERS_TOPIC,
+                Consumed.with(Serdes.String(), Serdes.String()),
+                Materialized.<String, String>as(Stores.persistentKeyValueStore(BLOCKED_USERS_STORE))
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(Serdes.String()));
+
+        return new KafkaStreams(builder.build(), props);
+    }
+
+    private static KafkaStreams buildStreamsApplication(KafkaStreams blockedUsersStreams) {
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
 
+        ReadOnlyKeyValueStore<String, String> blockedUsersStore =
+                blockedUsersStreams.store(StoreQueryParameters.fromNameAndType(BLOCKED_USERS_STORE, QueryableStoreTypes.keyValueStore()));
         StreamsBuilder builder = new StreamsBuilder();
 
-        KStream<String, String> inputBlockedUsers = builder.stream(
-                BLOCKED_USERS_TOPIC,
-                Consumed.with(Serdes.String(), Serdes.String()));
+        GlobalKTable<String, String> blockedWords = builder.globalTable(BLOCKED_WORDS_TOPIC);
 
-        inputBlockedUsers
-                .toTable(
-                        Materialized.<String, String>as(Stores.persistentKeyValueStore(BLOCKED_USERS_STORE))
-                                .withKeySerde(Serdes.String())
-                                .withValueSerde(Serdes.String())
-                );
-
-        // Поток для сообщений
         KStream<String, String> inputMessages = builder.stream(
                 MESSAGES_TOPIC,
                 Consumed.with(Serdes.String(), Serdes.String()));
 
-// Обрабатываем входные сообщения
-        KStream<String, String> filteredMessages = inputMessages
-                .transform(() -> new Transformer<String, String, KeyValue<String, String>>() {
-                    private KeyValueStore<String, String> store;
 
-                    @Override
-                    public void init(ProcessorContext context) {
-                        // Получаем доступ к хранилищу
-                        this.store = (KeyValueStore<String, String>) context.getStateStore(BLOCKED_USERS_STORE);
+        KStream<String, String> senderFilteredMessages = inputMessages
+                .filter((K, V) -> blockedUsersStore.get(K) == null || "unblocked".equals(blockedUsersStore.get(K)));
+
+        ObjectMapper mapper = new ObjectMapper();
+
+        KStream<String, String> wordSplitMessages = senderFilteredMessages
+                .mapValues(v -> {
+                    ObjectNode node = mapper.createObjectNode();
+                    node.put("original", v);
+                    node.put("guid", UUID.randomUUID().toString());
+                    return node.toString();
+                })
+                .flatMapValues(json -> {
+                    try {
+                        ObjectNode node = (ObjectNode) mapper.readTree(json);
+                        String original = node.get("original").asText();
+                        String guid = node.get("guid").asText();
+
+                        // Разбиваем original на слова и разделители, сохраняя их
+                        // Паттерн: последовательности букв/цифр/Unicode-слова OR последовательности не-слово-символов
+                        List<String> parts = Arrays.stream(PATTERN.split(original))
+                                .filter(s -> !s.isEmpty())
+                                .collect(Collectors.toList());
+
+                        // Для каждого фрагмента создаём JSON с тем же guid
+                        return parts.stream().map(word -> {
+                            ObjectNode out = mapper.createObjectNode();
+                            out.put("guid", guid);
+                            out.put("word", word);
+                            return out.toString();
+                        }).collect(Collectors.toList());
+
+                    } catch (Exception e) {
+                        // В случае ошибки парсинга — вернуть оригинальный json как одно значение
+                        return List.of(json);
                     }
-
-                    @Override
-                    public KeyValue<String, String> transform(String key, String value) {
-                        Boolean isBlocked = ("blocked".equals(store.get(key))); // Проверяем, заблокирован ли пользователь
-                        return KeyValue.pair(key, value + ";" + store.get(key));
-                        //return (isBlocked ? KeyValue.pair(key, null): KeyValue.pair(key, value));
-                    }
-
-                    @Override
-                    public void close() {
-                        // Здесь можно выполнить любые необходимые очистки
-                    }
-                }, BLOCKED_USERS_STORE);
-                //.filter((key, value) -> value != null); // Исключаем любые null значения
-
-// Отправляем отфильтрованные сообщения в FILTERED_MESSAGES_TOPIC
-        filteredMessages.to(FILTERED_MESSAGES_TOPIC, Produced.with(Serdes.String(), Serdes.String()));
+                });
+        
+        // Отправляем отфильтрованные сообщения в FILTERED_MESSAGES_TOPIC
+        wordSplitMessages.to(FILTERED_MESSAGES_TOPIC, Produced.with(Serdes.String(), Serdes.String()));
 
 
         // Запускаем приложение
@@ -217,10 +234,7 @@ public class MessageNetwork {
         }
     }
 
-    /**
-     * Загружает тестовые данные во входной топик
-     */
-    private static void loadTestData() {
+    private static void loadBlockedUsersTestData() {
         Properties producerProps = new Properties();
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -232,6 +246,23 @@ public class MessageNetwork {
                 {"Маша;Ярослав", "blocked"},
                 {"Маша;Денис", "unblocked"}
         };
+
+        try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProps)) {
+            for (String[] entry : blockedUsers) {
+                producer.send(new ProducerRecord<>(BLOCKED_USERS_TOPIC, entry[0], entry[1]));
+                System.out.println("Отправлено тестовое сообщение (Топик: " + BLOCKED_USERS_TOPIC +
+                        ", Ключ: " + entry[0] + ", Значение: " + entry[1]);
+            }
+            producer.flush();
+        }
+    }
+
+    private static void loadTestData() {
+        Properties producerProps = new Properties();
+        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
+        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+
         String[] blockedWords = {"дуб", "коза", "бред"};
         //{"<Recepient>;<Sender>", "<Message>"}
         String[][] messages = {
@@ -254,11 +285,6 @@ public class MessageNetwork {
         };
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProps)) {
-            for (String[] entry : blockedUsers) {
-                producer.send(new ProducerRecord<>(BLOCKED_USERS_TOPIC, entry[0], entry[1]));
-                System.out.println("Отправлено тестовое сообщение (Топик: " + BLOCKED_USERS_TOPIC +
-                        ", Ключ: " + entry[0] + ", Значение: " + entry[1]);
-            }
             for (String word : blockedWords) {
                 producer.send(new ProducerRecord<>(BLOCKED_WORDS_TOPIC, word, word));
                 System.out.println("Отправлено тестовое сообщение (Топик: " + BLOCKED_WORDS_TOPIC + ", Ключ: " + word +
