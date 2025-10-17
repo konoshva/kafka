@@ -1,28 +1,21 @@
 package com.example;
 
-import com.examples.SalesCountProcessorAPI;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.serialization.BooleanSerializer;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
-import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.state.*;
 
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.Objects;
 import java.util.stream.Collectors;
-import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class MessageNetwork {
@@ -32,6 +25,7 @@ public class MessageNetwork {
     private static final String MESSAGES_TOPIC = "messages";
     private static final String FILTERED_MESSAGES_TOPIC = "filtered_messages";
     private static final String BLOCKED_USERS_STORE = "blocked-users-store";
+    private static final String BLOCKED_WORDS_STORE = "blocked-words-store";
 
     private static final Pattern PATTERN = Pattern.compile("(?<=\\P{L})(?=\\p{L})|(?<=\\p{L})(?=\\P{L})",
             Pattern.UNICODE_CHARACTER_CLASS);
@@ -45,7 +39,7 @@ public class MessageNetwork {
         try {
             createTopics();
 
-            KafkaStreams blockedUsersStreams = buildStreamsAppForBlockedUsers();
+            KafkaStreams blockedUsersStreams = buildUtilityStreamsApp();
             blockedUsersStreams.cleanUp();
             blockedUsersStreams.start();
             System.out.println("Приложение для обработки BlockedUsers запущено");
@@ -69,7 +63,7 @@ public class MessageNetwork {
         }
     }
 
-    private static KafkaStreams buildStreamsAppForBlockedUsers() {
+    private static KafkaStreams buildUtilityStreamsApp() {
         // Настройка Kafka Streams
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId + "_bu");
@@ -84,7 +78,33 @@ public class MessageNetwork {
                         .withKeySerde(Serdes.String())
                         .withValueSerde(Serdes.String()));
 
+        builder.globalTable(BLOCKED_WORDS_TOPIC,
+                Consumed.with(Serdes.String(), Serdes.String()),
+                Materialized.<String, String>as(Stores.persistentKeyValueStore(BLOCKED_WORDS_STORE))
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(Serdes.String()));
+
         return new KafkaStreams(builder.build(), props);
+    }
+
+    public static String replaceWithFirstLetterEllipsis(String sentence, String word) {
+        if (sentence == null || word == null || word.isEmpty()) return sentence;
+
+        // экранируем word для использования в regex
+        String escaped = Pattern.quote(word);
+        // регекс для поиска всех вхождений без учёта регистра
+        Pattern p = Pattern.compile(escaped, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        Matcher m = p.matcher(sentence);
+
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String found = m.group();
+            // берем первую букву найденного вхождения в том регистре, в котором она стоит в тексте
+            String first = found.substring(0, 1);
+            m.appendReplacement(sb, Matcher.quoteReplacement(first + "..."));
+        }
+        m.appendTail(sb);
+        return sb.toString();
     }
 
     private static KafkaStreams buildStreamsApplication(KafkaStreams blockedUsersStreams) {
@@ -98,54 +118,36 @@ public class MessageNetwork {
                 blockedUsersStreams.store(StoreQueryParameters.fromNameAndType(BLOCKED_USERS_STORE, QueryableStoreTypes.keyValueStore()));
         StreamsBuilder builder = new StreamsBuilder();
 
-        GlobalKTable<String, String> blockedWords = builder.globalTable(BLOCKED_WORDS_TOPIC);
-
         KStream<String, String> inputMessages = builder.stream(
                 MESSAGES_TOPIC,
                 Consumed.with(Serdes.String(), Serdes.String()));
 
-
         KStream<String, String> senderFilteredMessages = inputMessages
                 .filter((K, V) -> blockedUsersStore.get(K) == null || "unblocked".equals(blockedUsersStore.get(K)));
 
-        ObjectMapper mapper = new ObjectMapper();
+        ReadOnlyKeyValueStore<String, String> blockedWordsStore =
+                blockedUsersStreams.store(StoreQueryParameters.fromNameAndType(BLOCKED_WORDS_STORE, QueryableStoreTypes.keyValueStore()));
 
-        KStream<String, String> wordSplitMessages = senderFilteredMessages
-                .mapValues(v -> {
-                    ObjectNode node = mapper.createObjectNode();
-                    node.put("original", v);
-                    node.put("guid", UUID.randomUUID().toString());
-                    return node.toString();
-                })
-                .flatMapValues(json -> {
+        KStream<String, String> filteredMessages = senderFilteredMessages
+                .mapValues(V -> {
+                    // перебор всех записей
+                    KeyValueIterator<String, String> iter = blockedWordsStore.all();
+                    String res = V;
                     try {
-                        ObjectNode node = (ObjectNode) mapper.readTree(json);
-                        String original = node.get("original").asText();
-                        String guid = node.get("guid").asText();
-
-                        // Разбиваем original на слова и разделители, сохраняя их
-                        // Паттерн: последовательности букв/цифр/Unicode-слова OR последовательности не-слово-символов
-                        List<String> parts = Arrays.stream(PATTERN.split(original))
-                                .filter(s -> !s.isEmpty())
-                                .collect(Collectors.toList());
-
-                        // Для каждого фрагмента создаём JSON с тем же guid
-                        return parts.stream().map(word -> {
-                            ObjectNode out = mapper.createObjectNode();
-                            out.put("guid", guid);
-                            out.put("word", word);
-                            return out.toString();
-                        }).collect(Collectors.toList());
-
-                    } catch (Exception e) {
-                        // В случае ошибки парсинга — вернуть оригинальный json как одно значение
-                        return List.of(json);
+                        while (iter.hasNext()) {
+                            KeyValue<String, String> kv = iter.next();
+                            String keyWord = kv.key;
+                            String valueWord = kv.value;
+                            res = replaceWithFirstLetterEllipsis(res, valueWord);
+                        }
+                    } finally {
+                        iter.close();
+                        return res;
                     }
                 });
-        
-        // Отправляем отфильтрованные сообщения в FILTERED_MESSAGES_TOPIC
-        wordSplitMessages.to(FILTERED_MESSAGES_TOPIC, Produced.with(Serdes.String(), Serdes.String()));
 
+        // Отправляем отфильтрованные сообщения в FILTERED_MESSAGES_TOPIC
+        filteredMessages.to(FILTERED_MESSAGES_TOPIC, Produced.with(Serdes.String(), Serdes.String()));
 
         // Запускаем приложение
         return new KafkaStreams(builder.build(), props);
