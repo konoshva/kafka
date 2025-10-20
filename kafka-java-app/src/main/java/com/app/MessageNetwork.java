@@ -6,7 +6,6 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
@@ -32,10 +31,15 @@ public class MessageNetwork {
         test = Arrays.stream(args)
                 .filter(java.util.Objects::nonNull)
                 .anyMatch(s -> s.equalsIgnoreCase("test"));
+        if (test) {
+            applicationId = applicationId + "_test";
+        }
         System.out.println("Входные параметры: \ntest = " + test);
         try {
             createTopics();
-            KafkaStreams utilityStreams = buildUtilityStreamsApp();
+            
+            //Стрим для динамического управления настройками (списком заблокированных слов и пар пользователей)
+            KafkaStreams utilityStreams = buildUtilityStreamsApp(); 
             if (test) {
                 utilityStreams.cleanUp(); //не работает
             }
@@ -51,12 +55,12 @@ public class MessageNetwork {
             System.out.println("\nПроверка " + BLOCKED_WORDS_STORE);
             queryStateStore(utilityStreams, BLOCKED_WORDS_STORE);
 
-            KafkaStreams streams = buildStreamsApplication(utilityStreams);
+            KafkaStreams streams = buildMessageStreamsApp(utilityStreams);
             streams.start();
             System.out.println("Приложение " + applicationId + " запущено");
             if (test) {
                 System.out.println("Загрузка тестовых пользовательских сообщений...");
-                loadTestData();
+                loadTestDataForMessageStreams();
             }
 
         } catch (Throwable e) {
@@ -66,8 +70,9 @@ public class MessageNetwork {
         }
     }
 
+    /*  Задает топологию потокового приложения для динамического управления настройками
+        (заблокированные слова и пары пользователей поддерживаются в актуальном состоянии в постоянных хранилищах) */
     private static KafkaStreams buildUtilityStreamsApp() {
-        // Настройка Kafka Streams
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId + "_bu");
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
@@ -75,12 +80,14 @@ public class MessageNetwork {
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
 
         StreamsBuilder builder = new StreamsBuilder();
+        //Создает постоянное хранилище на основании топика заблокированных пар пользователей
         builder.table(BLOCKED_USERS_TOPIC,
                 Consumed.with(Serdes.String(), Serdes.String()),
                 Materialized.<String, String>as(Stores.persistentKeyValueStore(BLOCKED_USERS_STORE))
                         .withKeySerde(Serdes.String())
                         .withValueSerde(Serdes.String()));
 
+        //Создает постоянное хранилище на основании топика запрещенных слов
         builder.globalTable(BLOCKED_WORDS_TOPIC,
                 Consumed.with(Serdes.String(), Serdes.String()),
                 Materialized.<String, String>as(Stores.persistentKeyValueStore(BLOCKED_WORDS_STORE))
@@ -90,54 +97,36 @@ public class MessageNetwork {
         return new KafkaStreams(builder.build(), props);
     }
 
-    public static String replaceWithFirstLetterEllipsis(String sentence, String word) {
-        if (sentence == null || word == null || word.isEmpty()) return sentence;
-
-        // экранируем word для использования в regex
-        String escaped = Pattern.quote(word);
-        // регекс для поиска всех вхождений без учёта регистра
-        Pattern p = Pattern.compile(escaped, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-        Matcher m = p.matcher(sentence);
-
-        StringBuffer sb = new StringBuffer();
-        while (m.find()) {
-            String found = m.group();
-            // берем первую букву найденного вхождения в том регистре, в котором она стоит в тексте
-            String first = found.substring(0, 1);
-            m.appendReplacement(sb, Matcher.quoteReplacement(first + "..."));
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
-
-    private static KafkaStreams buildStreamsApplication(KafkaStreams blockedUsersStreams) {
+    /*  Задает топологию потокового приложения для фильтрации пользовательских сообщений, как внутренней (когда внутри
+        сообщения маскируются запрещенные слова), так и внешней (когда отбрасывается все сообщение целиком между заданой
+        парой пользователей) */
+    private static KafkaStreams buildMessageStreamsApp(KafkaStreams blockedUsersStreams) {
         Properties props = new Properties();
         props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
         props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
 
-        ReadOnlyKeyValueStore<String, String> blockedUsersStore =
-                blockedUsersStreams.store(StoreQueryParameters.fromNameAndType(BLOCKED_USERS_STORE, QueryableStoreTypes.keyValueStore()));
         StreamsBuilder builder = new StreamsBuilder();
 
-        KStream<String, String> inputMessages = builder.stream(
-                MESSAGES_TOPIC,
-                Consumed.with(Serdes.String(), Serdes.String()));
-
-        KStream<String, String> senderFilteredMessages = inputMessages
-                .filter((K, V) -> blockedUsersStore.get(K) == null || "unblocked".equals(blockedUsersStore.get(K)));
+        ReadOnlyKeyValueStore<String, String> blockedUsersStore =
+                blockedUsersStreams.store(StoreQueryParameters.fromNameAndType(BLOCKED_USERS_STORE, QueryableStoreTypes.keyValueStore()));
 
         ReadOnlyKeyValueStore<String, String> blockedWordsStore =
                 blockedUsersStreams.store(StoreQueryParameters.fromNameAndType(BLOCKED_WORDS_STORE, QueryableStoreTypes.keyValueStore()));
 
-        KStream<String, String> filteredMessages = senderFilteredMessages
+        KStream<String, String> filteredMessages =
+                builder.stream(MESSAGES_TOPIC, Consumed.with(Serdes.String(), Serdes.String()))
+                //Отбрасывает сообщения между пользователями, коммуникация между которыми заблокирована
+                .filter((K, V) -> blockedUsersStore.get(K) == null || "unblocked".equals(blockedUsersStore.get(K)))
+                //Маскирует запрещенные слова
                 .mapValues(V -> {
-                    // перебор всех записей
+                    //Перебирает заблокированные слова
                     KeyValueIterator<String, String> iter = blockedWordsStore.all();
                     String res = V;
                     try {
                         while (iter.hasNext()) {
+                            //Исключает все вхождения запрещенного слова
                             KeyValue<String, String> kv = iter.next();
                             if ("blocked".equals(kv.value)) {
                                 res = replaceWithFirstLetterEllipsis(res, kv.key);
@@ -149,17 +138,17 @@ public class MessageNetwork {
                     }
                 });
 
-        // Отправляем отфильтрованные сообщения в FILTERED_MESSAGES_TOPIC
+        //Отправляет прошедшие фильтрацию сообщения в FILTERED_MESSAGES_TOPIC
         filteredMessages.to(FILTERED_MESSAGES_TOPIC, Produced.with(Serdes.String(), Serdes.String()));
 
-        // Запускаем приложение
         return new KafkaStreams(builder.build(), props);
     }
 
+    /*  Ожидает пока state store перейдет в рабочее состояние, после чего возвращает его содержимое */
     private static void queryStateStore(KafkaStreams streams, String stateStorageName) {
-        // Ожидаем, пока состояние потока не станет RUNNING
+        //Ожидает, пока состояние потока не станет RUNNING
         try {
-            // Ждем, пока streams не перейдет в состояние RUNNING
+            //Ждет, пока streams не перейдет в состояние RUNNING
             waitForStateStoreToBeReady(streams, stateStorageName);
 
             System.out.println("Текущие результаты из state store:");
@@ -179,7 +168,7 @@ public class MessageNetwork {
         }
     }
 
-    //Ожидает, пока state store не будет готово к запросам
+    /*  Ожидает, пока state store не будет готово к запросам */
     private static void waitForStateStoreToBeReady(KafkaStreams streams, String stateStorageName) throws InterruptedException {
         // Максимальное время ожидания и интервал проверки
         final long MAX_WAIT_MS = 60000; // 60 секунд
@@ -188,17 +177,17 @@ public class MessageNetwork {
         long startTime = System.currentTimeMillis();
         long endTime = startTime + MAX_WAIT_MS;
 
-        // Проверяем состояние потока с интервалом
+        // Проверяет состояние потока с интервалом
         while (System.currentTimeMillis() < endTime) {
             if (streams.state() == KafkaStreams.State.RUNNING) {
-                // Пробуем получить доступ к хранилищу
+                // Пробует получить доступ к хранилищу
                 try {
                     streams.store(StoreQueryParameters.fromNameAndType(
                             stateStorageName, QueryableStoreTypes.keyValueStore()));
                     System.out.println("State store готово к запросам");
                     return; // Хранилище готово
                 } catch (Exception e) {
-                    // Хранилище еще не готово, продолжаем ожидание
+                    // Хранилище еще не готово, продолжает ожидание
                     System.out.println("Ожидание готовности state store... (" +
                             (System.currentTimeMillis() - startTime) / 1000 + " сек)");
                 }
@@ -207,13 +196,51 @@ public class MessageNetwork {
                         streams.state());
             }
 
-            // Ждем перед следующей проверкой
+            // Ждет некоторое время перед следующей проверкой
             Thread.sleep(RETRY_INTERVAL_MS);
         }
 
         throw new RuntimeException("Превышено время ожидания готовности state store");
     }
 
+    /*  Ожидает, пока потоковое приложение не перейдет в рабочее состояние */
+    private static void waitUntilKafkaStreamsIsRunning(KafkaStreams streams) throws Exception {
+        int maxRetries = 50;
+        int retryIntervalMs = 2000;
+        int attempt = 0;
+
+        while (attempt < maxRetries) {
+            if (streams.state() == KafkaStreams.State.RUNNING) {
+                System.out.println("Kafka Streams успешно запущен");
+                return;
+            }
+
+            System.out.println("Ожидание запуска Kafka Streams... Текущее состояние: " + streams.state());
+            Thread.sleep(retryIntervalMs);
+            attempt++;
+        }
+
+        throw new RuntimeException("Превышено время ожидания запуска Kafka Streams");
+    }
+
+    /*  Создает необходимые топики:
+            blocked_users:
+                Key - строка формата: "<Recipient>;<Sender>"
+                Value - строка с возможными значениями:
+                    "blocked" - канал связи заблокирован
+                    "<AnotherValue>" или tombstone - канал связи разблокирован
+            blocked_words:
+                Key - строка формата: "<BlockedWord>"
+                Value - строка с возможными значениями:
+                    "blocked" - слово заблокировано
+                    "<AnotherValue>" или tombstone - слово разблокировано
+            messages (входные сообщения):
+                Key - строка формата: "<Recepient>;<Sender>"
+                Value - строка формата: "<Message>"
+            filtered_messages (прошедшие фильтрацию сообщения):
+                Key - строка формата: "<Recepient>;<Sender>"
+                Value - строка формата: "<Message>"
+        */
     private static void createTopics() {
         Properties adminProps = new Properties();
         adminProps.put("bootstrap.servers", BOOTSTRAP_SERVERS);
@@ -231,6 +258,28 @@ public class MessageNetwork {
         }
     }
 
+    /*  Экранирует в переданной строке переданное слово, оставляя от него только первую букву с многоточием */
+    public static String replaceWithFirstLetterEllipsis(String sentence, String word) {
+        if (sentence == null || word == null || word.isEmpty()) return sentence;
+
+        // экранирует word для использования в regex
+        String escaped = Pattern.quote(word);
+        // регекс для поиска всех вхождений без учёта регистра
+        Pattern p = Pattern.compile(escaped, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        Matcher m = p.matcher(sentence);
+
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String found = m.group();
+            // берет первую букву найденного вхождения в том регистре, в котором она стоит в тексте
+            String first = found.substring(0, 1);
+            m.appendReplacement(sb, Matcher.quoteReplacement(first + "..."));
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    /*  Загружает тестовые данные для списка заблокированных слов и списка заблокированных пар пользователей */
     private static void loadTestDataForUtilityStreams() {
         Properties producerProps = new Properties();
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
@@ -243,11 +292,12 @@ public class MessageNetwork {
                 {"Маша;Ярослав", "blocked"},
                 {"Маша;Денис", "unblocked"}
         };
+
+        //{"<BlockedWords>", "blocked"|"unblocked"}
         String[][] blockedWords = {
                 {"дуб", "blocked"},
                 {"коза", "blocked"},
-                {"бред", "blocked"},
-                {"челны", "unblocked"}
+                {"бред", "blocked"}
         };
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProps)) {
@@ -265,7 +315,8 @@ public class MessageNetwork {
         }
     }
 
-    private static void loadTestData() {
+    /*  Загружает тестовые пользовательские сообщения */
+    private static void loadTestDataForMessageStreams() {
         Properties producerProps = new Properties();
         producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -288,7 +339,7 @@ public class MessageNetwork {
                 {"Лена;Наташа", ":) Да уж, спец по лирике. Кто-то сдал?"},
                 {"Наташа;Лена", "Будем переписывать на след. неделе. На завтра - Болконский и дуб на память. Почти две страницы. Застрелиться!!!"},
                 {"Лена;Наташа", "завтра?! Ох... я ору"},
-                {"Наташа;Лена", "Бесполезно - Великий Мельдоний"}
+                {"Наташа;Лена", "Кричать, как сказал Великий Мельдоний, бесполезно :("}
         };
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProps)) {
@@ -301,24 +352,5 @@ public class MessageNetwork {
             producer.flush();
             System.out.println("Все тестовые сообщения отправлены");
         }
-    }
-
-    private static void waitUntilKafkaStreamsIsRunning(KafkaStreams streams) throws Exception {
-        int maxRetries = 50;
-        int retryIntervalMs = 2000;
-        int attempt = 0;
-
-        while (attempt < maxRetries) {
-            if (streams.state() == KafkaStreams.State.RUNNING) {
-                System.out.println("Kafka Streams успешно запущен");
-                return;
-            }
-
-            System.out.println("Ожидание запуска Kafka Streams... Текущее состояние: " + streams.state());
-            Thread.sleep(retryIntervalMs);
-            attempt++;
-        }
-
-        throw new RuntimeException("Превышено время ожидания запуска Kafka Streams");
     }
 }
