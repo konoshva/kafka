@@ -1,8 +1,1 @@
-com\example\SingleMessageConsumerJson.class
-com\example\SingleMessageConsumerJson$Product.class
-com\example\TopicChecker.class
-com\example\ProducerJson.class
-com\example\BatchMessageConsumerJson$Product.class
-com\example\ProducerJson$Product.class
-com\example\SimpleKafkaStreamsExample.class
-com\example\BatchMessageConsumerJson.class
+com\example\MessageNetwork.class

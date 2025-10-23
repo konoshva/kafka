@@ -1,4 +1,4 @@
-package com.app;
+package com.example;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -16,7 +16,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MessageNetwork {
-    private static final String BOOTSTRAP_SERVERS = "localhost:9092";
+    //    private static final String BOOTSTRAP_SERVERS = "kafka-0:9092";
+    private static final String BOOTSTRAP_SERVERS = "localhost:19092";
     private static final String BLOCKED_USERS_TOPIC = "blocked_users";
     private static final String BLOCKED_WORDS_TOPIC = "blocked_words";
     private static final String MESSAGES_TOPIC = "messages";
